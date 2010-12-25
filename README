@@ -1,0 +1,5 @@
+Build:
+mvn clean install
+
+See:
+http://ashenfad.blogspot.com/2010/12/decision-trees-in-hadoop-part-1-data.html
