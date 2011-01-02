@@ -1,5 +1,7 @@
 package hadooptree;
 
+import hadooptree.tree.Field;
+import hadooptree.tree.Tree;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.Reader;

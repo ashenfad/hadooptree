@@ -1,5 +1,9 @@
 package hadooptree;
 
+import hadooptree.job.DefineFieldsJob;
+import hadooptree.tree.Tree;
+import hadooptree.tree.Field;
+import hadooptree.tree.Node;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashSet;

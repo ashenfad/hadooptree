@@ -1,5 +1,12 @@
 package hadooptree;
 
+import hadooptree.job.NodeFieldSplitJob;
+import hadooptree.job.NodeSplitJob;
+import hadooptree.job.DefineFieldsJob;
+import hadooptree.tree.Field;
+import hadooptree.tree.Tree;
+import hadooptree.tree.Node;
+import hadooptree.tree.Split;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileWriter;
@@ -134,8 +141,8 @@ public class TreeBuilder {
   private static Job findBestFieldSplitJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
     Job fieldSplitJob = new Job(conf, "best field splits job");
     fieldSplitJob.setJarByClass(TreeBuilder.class);
-    fieldSplitJob.setMapperClass(FieldSplitSelectJob.Map.class);
-    fieldSplitJob.setReducerClass(FieldSplitSelectJob.Reduce.class);
+    fieldSplitJob.setMapperClass(NodeSplitJob.Map.class);
+    fieldSplitJob.setReducerClass(NodeSplitJob.Reduce.class);
 
     fieldSplitJob.setMapOutputKeyClass(Text.class);
     fieldSplitJob.setMapOutputValueClass(Text.class);
@@ -151,8 +158,8 @@ public class TreeBuilder {
   private static Job findBestCategorySplitJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
     Job categorySplitJob = new Job(conf, "best category splits job");
     categorySplitJob.setJarByClass(TreeBuilder.class);
-    categorySplitJob.setMapperClass(CategorySplitSelectJob.Map.class);
-    categorySplitJob.setReducerClass(CategorySplitSelectJob.Reduce.class);
+    categorySplitJob.setMapperClass(NodeFieldSplitJob.Map.class);
+    categorySplitJob.setReducerClass(NodeFieldSplitJob.Reduce.class);
 
     categorySplitJob.setMapOutputKeyClass(Text.class);
     categorySplitJob.setMapOutputValueClass(Text.class);

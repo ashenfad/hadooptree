@@ -5,7 +5,7 @@
   <groupId>hadooptree</groupId>
   <artifactId>HadoopTree</artifactId>
   <packaging>jar</packaging>
-  <version>1.0</version>
+  <version>1.01</version>
   <name>HadoopTree</name>
   <url>http://maven.apache.org</url>
   <build>
