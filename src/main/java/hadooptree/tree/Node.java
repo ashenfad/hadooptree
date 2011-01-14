@@ -1,6 +1,7 @@
 package hadooptree.tree;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.TreeMap;
@@ -8,13 +9,13 @@ import org.jdom.Element;
 
 public class Node {
 
-  private final int id;
-  private final Node parent;
+  private Node parent;
+  private int id;
   private Node trueChild;
   private Node falseChild;
   private boolean isLeaf;
   private Split split;
-  private TreeMap<String, Long> objectiveCategoryMap;
+  private TreeMap<String, Long> objectiveCategoryCountMap;
 
   public Node(int id, Node parent) {
     this.id = id;
@@ -22,13 +23,40 @@ public class Node {
     this.isLeaf = false;
   }
 
-  public Node(int id, Node parent, TreeMap<String, Long> objectiveCategoryMap) {
+  public Node(int id, Node parent, TreeMap<String, Long> objectiveCategoryCountMap) {
     this(id, parent);
-    this.objectiveCategoryMap = objectiveCategoryMap;
+    this.objectiveCategoryCountMap = objectiveCategoryCountMap;
   }
 
   public Node getParent(Node parent) {
     return parent;
+  }
+
+  public void merge(Node subtree, HashMap<Integer, Node> nodeMap) {
+    this.isLeaf = subtree.isLeaf;
+    if (!this.isLeaf) {
+      this.split = subtree.split;
+      this.trueChild = subtree.trueChild;
+      this.falseChild = subtree.falseChild;
+
+      this.trueChild.parent = this;
+      this.falseChild.parent = this;
+
+      this.trueChild.assignId(nodeMap);
+      this.falseChild.assignId(nodeMap);
+    }
+  }
+
+  private void assignId(HashMap<Integer, Node> nodeMap) {
+    if (id == -1) {
+      id = nodeMap.size();
+      nodeMap.put(id, this);
+
+      if (!isLeaf) {
+        trueChild.assignId(nodeMap);
+        falseChild.assignId(nodeMap);
+      }
+    }
   }
 
   public double[] getRange(Node node, Field field) {
@@ -57,16 +85,20 @@ public class Node {
 
   public long getTotalCount() {
     long count = 0;
-    for (Long categoryCount : objectiveCategoryMap.values()) {
+    for (Long categoryCount : objectiveCategoryCountMap.values()) {
       count += categoryCount;
     }
     return count;
   }
 
+  public TreeMap<String, Long> getObjectiveCategoryCountMap() {
+    return objectiveCategoryCountMap;
+  }
+
   public String getPredictedClass() {
     String predictedClass = null;
     long maxCount = 0;
-    for (Entry<String, Long> entry : objectiveCategoryMap.entrySet()) {
+    for (Entry<String, Long> entry : objectiveCategoryCountMap.entrySet()) {
       long count = entry.getValue();
       if (maxCount < count) {
         maxCount = count;
@@ -100,6 +132,10 @@ public class Node {
     return id;
   }
 
+  public void setId(int id) {
+    this.id = id;
+  }
+
   public void addSplit(Split split, Node trueChild, Node falseChild) {
     this.split = split;
     this.trueChild = trueChild;
@@ -111,9 +147,9 @@ public class Node {
     element.setAttribute("id", String.valueOf(id));
     element.setAttribute("isLeaf", String.valueOf(isLeaf));
 
-    if (objectiveCategoryMap != null) {
+    if (objectiveCategoryCountMap != null) {
       Element classCounts = new Element("classCounts");
-      for (Entry<String, Long> entry : objectiveCategoryMap.entrySet()) {
+      for (Entry<String, Long> entry : objectiveCategoryCountMap.entrySet()) {
         String category = entry.getKey();
         Long count = entry.getValue();
         Element classCount = new Element("classCount");

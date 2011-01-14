@@ -9,7 +9,7 @@ import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.mapreduce.Reducer;
 
-public class NodeSplitJob {
+public class NodeSplitsJob {
 
   public static class Map extends Mapper<LongWritable, Text, Text, Text> {
 

@@ -19,7 +19,7 @@ import org.apache.hadoop.mapreduce.Mapper;
 import org.apache.hadoop.mapreduce.Mapper.Context;
 import org.apache.hadoop.mapreduce.Reducer;
 
-public class NodeFieldSplitJob {
+public class NodeFieldSplitsJob {
 
   public static class Map extends Mapper<LongWritable, Text, Text, Text> {
 
@@ -58,7 +58,7 @@ public class NodeFieldSplitJob {
 
       Node node = tree.evalToNode(instance);
 
-      if (node.isLeaf()) {
+      if (node.isLeaf() || node.getTotalCount() < Utils.DEFAULT_SUBTREE_FLOOR) {
         return;
       }
 
@@ -89,7 +89,6 @@ public class NodeFieldSplitJob {
   public static class Reduce
           extends Reducer<Text, Text, NullWritable, Text> {
 
-    private static final double LOG2 = Math.log(2);
     private Tree tree;
 
     @Override
@@ -137,10 +136,10 @@ public class NodeFieldSplitJob {
       int objectiveCategoryCount = tree.getObjectiveField().getCategorySet().size();
 
       ArrayList<String> objectiveCategories = new ArrayList<String>(tree.getObjectiveField().getCategorySet());
-      HashMap<String, Integer> objectiveCategoryIdMap = new HashMap<String, Integer>();
-      for (int i = 0; i < objectiveCategories.size(); i++) {
-        objectiveCategoryIdMap.put(objectiveCategories.get(i), i);
-      }
+      HashMap<String, Integer> objectiveCategoryIdMap = tree.createObjectiveCategoryIdMap();
+
+      Long[] originalCounts = new Long[objectiveCategoryCount];
+      Arrays.fill(originalCounts, 0l);
 
       HashMap<String, Long[]> splitCounts = new HashMap<String, Long[]>();
       for (String split : field.getCategorySet()) {
@@ -148,9 +147,6 @@ public class NodeFieldSplitJob {
         Arrays.fill(countArray, 0l);
         splitCounts.put(split, countArray);
       }
-
-      Long[] originalCounts = new Long[objectiveCategoryCount];
-      Arrays.fill(originalCounts, 0l);
 
       Iterator<Text> iter = values.iterator();
       while (iter.hasNext()) {
@@ -165,10 +161,6 @@ public class NodeFieldSplitJob {
         originalCounts[categoryId]++;
       }
 
-      long totalInstanceCount = sumCounts(originalCounts);
-      double hy = entropy(originalCounts, totalInstanceCount);
-      double invDataSize = 1.0 / totalInstanceCount;
-
       double maxInformationGain = -Double.MAX_VALUE;
       String bestSplitValue = null;
       Long[] bestEqualToCounts = null;
@@ -178,19 +170,11 @@ public class NodeFieldSplitJob {
         String candidateSplit = candidateSplitEntry.getKey();
 
         Long[] equalToCounts = candidateSplitEntry.getValue();
-        long equalToInstanceCount = sumCounts(equalToCounts);
+        Long[] notEqualToCounts = Utils.subtractCounts(originalCounts.clone(), equalToCounts);
 
-        Long[] notEqualToCounts = subtractCounts(originalCounts.clone(), equalToCounts);
-        long notEqualToInstanceCount = totalInstanceCount - equalToInstanceCount;
-
-
-
-        double informationGain = hy;
-        // = split
-        informationGain -= equalToInstanceCount * invDataSize * entropy(equalToCounts, equalToInstanceCount);
-
-        // != split
-        informationGain -= notEqualToInstanceCount * invDataSize * entropy(notEqualToCounts, notEqualToInstanceCount);
+        double informationGain = Utils.findInformationGain(originalCounts, equalToCounts, notEqualToCounts);
+        long equalToInstanceCount = Utils.sumCounts(equalToCounts);
+        long notEqualToInstanceCount = Utils.sumCounts(notEqualToCounts);
 
         if (informationGain > maxInformationGain
                 && equalToInstanceCount > Utils.DEFAULT_SPLIT_FLOOR
@@ -211,9 +195,9 @@ public class NodeFieldSplitJob {
         builder.append(",");
         builder.append(String.valueOf(maxInformationGain));
         builder.append(",");
-        builder.append(printCounts(objectiveCategories, bestEqualToCounts));
+        builder.append(Utils.printCounts(objectiveCategories, bestEqualToCounts));
         builder.append(",");
-        builder.append(printCounts(objectiveCategories, bestNotEqualToCounts));
+        builder.append(Utils.printCounts(objectiveCategories, bestNotEqualToCounts));
         result = builder.toString();
       }
       return result;
@@ -227,24 +211,21 @@ public class NodeFieldSplitJob {
       int bucketCount = splitCount + 1;
       double bucketSize = range / (double) bucketCount;
 
-      int categoryCount = tree.getObjectiveField().getCategorySet().size();
+      int objectiveCategoryCount = tree.getObjectiveField().getCategorySet().size();
 
       ArrayList<String> objectiveCategories = new ArrayList<String>(tree.getObjectiveField().getCategorySet());
-      HashMap<String, Integer> categoryIdMap = new HashMap<String, Integer>();
-      for (int i = 0; i < objectiveCategories.size(); i++) {
-        categoryIdMap.put(objectiveCategories.get(i), i);
-      }
+      HashMap<String, Integer> objectiveCategoryIdMap = tree.createObjectiveCategoryIdMap();
+
+      Long[] originalCounts = new Long[objectiveCategoryCount];
+      Arrays.fill(originalCounts, 0l);
 
       TreeMap<Double, Long[]> bucketCounts = new TreeMap<Double, Long[]>();
       for (int i = 1; i <= bucketCount; i++) {
         double bucketCeiling = rangeValues[0] + (i * bucketSize);
-        Long[] countArray = new Long[categoryCount];
+        Long[] countArray = new Long[objectiveCategoryCount];
         Arrays.fill(countArray, 0l);
         bucketCounts.put(bucketCeiling, countArray);
       }
-
-      Long[] originalCounts = new Long[categoryCount];
-      Arrays.fill(originalCounts, 0l);
 
       Iterator<Text> iter = values.iterator();
       while (iter.hasNext()) {
@@ -253,7 +234,7 @@ public class NodeFieldSplitJob {
         double fieldValue = Double.valueOf(tokens[0]);
         String targetCategory = tokens[1];
 
-        int categoryId = categoryIdMap.get(targetCategory);
+        int categoryId = objectiveCategoryIdMap.get(targetCategory);
         Entry<Double, Long[]> entry = bucketCounts.ceilingEntry(fieldValue);
         if (entry == null) {
         } else {
@@ -264,18 +245,16 @@ public class NodeFieldSplitJob {
 
       }
 
-      long totalInstanceCount = sumCounts(originalCounts);
-      double hy = entropy(originalCounts, totalInstanceCount);
-      double invDataSize = 1.0 / totalInstanceCount;
+      long totalInstanceCount = Utils.sumCounts(originalCounts);
 
       long lessThanInstanceCount = 0;
-      Long[] lessThanCounts = new Long[categoryCount];
+      Long[] lessThanCounts = new Long[objectiveCategoryCount];
       Arrays.fill(lessThanCounts, 0l);
 
       long greaterThanInstanceCount = totalInstanceCount;
-      Long[] greaterThanCounts = new Long[categoryCount];
+      Long[] greaterThanCounts = new Long[objectiveCategoryCount];
       Arrays.fill(greaterThanCounts, 0l);
-      addCounts(greaterThanCounts, originalCounts);
+      Utils.addCounts(greaterThanCounts, originalCounts);
 
       double maxInformationGain = -Double.MAX_VALUE;
       double bestSplitValue = -Double.MAX_VALUE;
@@ -286,20 +265,14 @@ public class NodeFieldSplitJob {
         double candidateSplit = candidateSplitEntry.getKey();
         Long[] counts = candidateSplitEntry.getValue();
 
-        long instanceCount = sumCounts(counts);
+        lessThanCounts = Utils.addCounts(lessThanCounts, counts);
+        greaterThanCounts = Utils.subtractCounts(greaterThanCounts, counts);
 
-        lessThanCounts = addCounts(lessThanCounts, counts);
-        lessThanInstanceCount += instanceCount;
+        double informationGain = Utils.findInformationGain(originalCounts, lessThanCounts, greaterThanCounts);
 
-        greaterThanCounts = subtractCounts(greaterThanCounts, counts);
+        long instanceCount = Utils.sumCounts(counts);
         greaterThanInstanceCount -= instanceCount;
-
-        double informationGain = hy;
-        // < split
-        informationGain -= lessThanInstanceCount * invDataSize * entropy(lessThanCounts, lessThanInstanceCount);
-
-        // > split
-        informationGain -= greaterThanInstanceCount * invDataSize * entropy(greaterThanCounts, greaterThanInstanceCount);
+        lessThanInstanceCount += instanceCount;
 
         if (informationGain > maxInformationGain
                 && lessThanInstanceCount > Utils.DEFAULT_SPLIT_FLOOR
@@ -320,9 +293,9 @@ public class NodeFieldSplitJob {
         builder.append(",");
         builder.append(String.valueOf(maxInformationGain));
         builder.append(",");
-        builder.append(printCounts(objectiveCategories, bestLessThanCounts));
+        builder.append(Utils.printCounts(objectiveCategories, bestLessThanCounts));
         builder.append(",");
-        builder.append(printCounts(objectiveCategories, bestGreaterThanCounts));
+        builder.append(Utils.printCounts(objectiveCategories, bestGreaterThanCounts));
         result = builder.toString();
       }
       return result;
@@ -337,68 +310,10 @@ public class NodeFieldSplitJob {
       builder.append(",");
       builder.append(String.valueOf(-Double.MAX_VALUE));
       builder.append(",");
-      builder.append(printCounts(categories, counts));
+      builder.append(Utils.printCounts(categories, counts));
       builder.append(",");
-      builder.append(printCounts(categories, counts));
+      builder.append(Utils.printCounts(categories, counts));
       return builder.toString();
-    }
-
-    private static String printCounts(ArrayList<String> categories, Long[] counts) {
-      StringBuilder builder = new StringBuilder();
-      for (int i = 0; i < counts.length; i++) {
-        builder.append(categories.get(i));
-        builder.append("@");
-        builder.append(counts[i]);
-        builder.append(";");
-      }
-
-      String resultString = builder.toString();
-      resultString = resultString.substring(0, resultString.length() - 1);
-
-      return resultString;
-    }
-
-    private static long sumCounts(Long[] counts) {
-      long count = 0;
-      for (Long splitCount : counts) {
-        count += splitCount;
-      }
-      return count;
-    }
-
-    private static Long[] addCounts(Long[] targetCounts, Long[] sourceCounts) {
-      for (int i = 0; i < targetCounts.length; i++) {
-        targetCounts[i] += sourceCounts[i];
-      }
-
-      return targetCounts;
-    }
-
-    private static Long[] subtractCounts(Long[] targetCounts, Long[] sourceCounts) {
-      for (int i = 0; i < targetCounts.length; i++) {
-        targetCounts[i] -= sourceCounts[i];
-      }
-
-      return targetCounts;
-    }
-
-    private static double entropy(Long[] counts, long instanceCount) {
-      if (instanceCount == 0) {
-        return 0.0;
-      }
-
-      double entropy = 0.0;
-      double invDataSize = 1.0 / instanceCount;
-
-      for (Long count : counts) {
-        if (count == 0) {
-          continue; // otherwise we get a NaN
-        }
-        double p = count * invDataSize;
-        entropy += -p * Math.log(p) / LOG2;
-      }
-
-      return entropy;
     }
   }
 }

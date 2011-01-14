@@ -1,8 +1,9 @@
 package hadooptree;
 
-import hadooptree.job.NodeFieldSplitJob;
-import hadooptree.job.NodeSplitJob;
+import hadooptree.job.NodeFieldSplitsJob;
+import hadooptree.job.NodeSplitsJob;
 import hadooptree.job.DefineFieldsJob;
+import hadooptree.job.GrowSubtreesJob;
 import hadooptree.tree.Field;
 import hadooptree.tree.Tree;
 import hadooptree.tree.Node;
@@ -51,6 +52,7 @@ public class TreeBuilder {
     Path fieldPath = new Path(outputPath, "fields");
     Path categorySplitsPath = new Path(outputPath, "categorySplits");
     Path fieldSplitsPath = new Path(outputPath, "fieldSplits");
+    Path subtreesPath = new Path(outputPath, "subtrees");
     Path treePath = new Path(outputPath, "tree/tree.xml");
 
     int objectiveFieldId = Integer.valueOf(otherArgs[2]);
@@ -85,8 +87,35 @@ public class TreeBuilder {
 
     boolean grewTree = true;
     long currentLeafInstanceCount = 0;
+    if (treeRoot.getTotalCount() <= Utils.DEFAULT_SUBTREE_FLOOR) {
+      currentLeafInstanceCount += treeRoot.getTotalCount();
+    }
+
     while (grewTree) {
       DistributedCache.addCacheFile(treePath.toUri(), conf);
+
+      double ratio = (double) currentLeafInstanceCount / (double) treeRoot.getTotalCount();
+      if (ratio > Utils.SUBTREE_AND_LEAF_RATIO) {
+        Job growSubtreesJob = growSubtreesJob(args, conf, inputPath, subtreesPath);
+        result = growSubtreesJob.waitForCompletion(true);
+
+        if (!result) {
+          System.exit(1);
+        }
+
+        ArrayList<Node> subtrees = readSubtrees(conf, subtreesPath, tree.getObjectiveFieldIndex());
+        fs.delete(subtreesPath, true);
+
+        if (!subtrees.isEmpty()) {
+          for (Node subtree : subtrees) {
+            Node originalNode = nodeMap.get(subtree.getId());
+            originalNode.merge(subtree, nodeMap);
+          }
+
+          writeTree(tree, fs, treePath);
+        }
+        currentLeafInstanceCount = 0;
+      }
 
       Job categorySplitsJob = findBestCategorySplitJob(args, conf, inputPath, categorySplitsPath);
       result = categorySplitsJob.waitForCompletion(true);
@@ -138,11 +167,28 @@ public class TreeBuilder {
     fs.copyFromLocalFile(false, true, new Path(treeFile.getPath()), treePath);
   }
 
+  private static Job growSubtreesJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
+    Job growSubtreesJob = new Job(conf, "grow subtrees");
+    growSubtreesJob.setJarByClass(TreeBuilder.class);
+    growSubtreesJob.setMapperClass(GrowSubtreesJob.Map.class);
+    growSubtreesJob.setReducerClass(GrowSubtreesJob.Reduce.class);
+
+    growSubtreesJob.setMapOutputKeyClass(Text.class);
+    growSubtreesJob.setMapOutputValueClass(Text.class);
+    growSubtreesJob.setOutputKeyClass(NullWritable.class);
+    growSubtreesJob.setOutputValueClass(Text.class);
+
+    FileInputFormat.addInputPath(growSubtreesJob, inputPath);
+    FileOutputFormat.setOutputPath(growSubtreesJob, outputPath);
+
+    return growSubtreesJob;
+  }
+
   private static Job findBestFieldSplitJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
-    Job fieldSplitJob = new Job(conf, "best field splits job");
+    Job fieldSplitJob = new Job(conf, "best field splits");
     fieldSplitJob.setJarByClass(TreeBuilder.class);
-    fieldSplitJob.setMapperClass(NodeSplitJob.Map.class);
-    fieldSplitJob.setReducerClass(NodeSplitJob.Reduce.class);
+    fieldSplitJob.setMapperClass(NodeSplitsJob.Map.class);
+    fieldSplitJob.setReducerClass(NodeSplitsJob.Reduce.class);
 
     fieldSplitJob.setMapOutputKeyClass(Text.class);
     fieldSplitJob.setMapOutputValueClass(Text.class);
@@ -156,10 +202,10 @@ public class TreeBuilder {
   }
 
   private static Job findBestCategorySplitJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
-    Job categorySplitJob = new Job(conf, "best category splits job");
+    Job categorySplitJob = new Job(conf, "best category splits");
     categorySplitJob.setJarByClass(TreeBuilder.class);
-    categorySplitJob.setMapperClass(NodeFieldSplitJob.Map.class);
-    categorySplitJob.setReducerClass(NodeFieldSplitJob.Reduce.class);
+    categorySplitJob.setMapperClass(NodeFieldSplitsJob.Map.class);
+    categorySplitJob.setReducerClass(NodeFieldSplitsJob.Reduce.class);
 
     categorySplitJob.setMapOutputKeyClass(Text.class);
     categorySplitJob.setMapOutputValueClass(Text.class);
@@ -173,7 +219,7 @@ public class TreeBuilder {
   }
 
   private static Job setupDefineFieldsJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
-    Job defineFieldsJob = new Job(conf, "define fields job");
+    Job defineFieldsJob = new Job(conf, "define fields");
     defineFieldsJob.setJarByClass(TreeBuilder.class);
     defineFieldsJob.setMapperClass(DefineFieldsJob.Map.class);
     defineFieldsJob.setReducerClass(DefineFieldsJob.Reduce.class);
@@ -187,6 +233,42 @@ public class TreeBuilder {
     FileOutputFormat.setOutputPath(defineFieldsJob, outputPath);
 
     return defineFieldsJob;
+  }
+
+  private static ArrayList<Node> readSubtrees(Configuration conf, Path inputPath, int objectiveFieldIndex) throws Exception {
+    FileSystem fs = FileSystem.get(conf);
+    FileStatus[] ls = fs.listStatus(inputPath);
+
+    ArrayList<String> allLines = new ArrayList<String>();
+    for (FileStatus fileStatus : ls) {
+      if (fileStatus.getPath().getName().startsWith("part")) {
+        FSDataInputStream in = fs.open(fileStatus.getPath());
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        IOUtils.copyBytes(in, out, conf);
+        in.close();
+        out.close();
+
+        String[] lines = out.toString().split("\n");
+        allLines.addAll(Arrays.asList(lines));
+      }
+    }
+
+    ArrayList<Node> subtrees = new ArrayList<Node>();
+
+    SAXBuilder builder = new SAXBuilder();
+    for (String line : allLines) {
+      if (line.isEmpty()) {
+        continue;
+      }
+
+      Reader in = new StringReader(line);
+
+      Element subtreeElement = builder.build(in).getRootElement();
+      Node subtree = Node.fromElement(subtreeElement, objectiveFieldIndex, null);
+      subtrees.add(subtree);
+    }
+
+    return subtrees;
   }
 
   private static ArrayList<Field> readFieldDefinitions(Configuration conf, Path inputPath) throws Exception {
@@ -289,6 +371,14 @@ public class TreeBuilder {
         grewTree = true;
 
         System.out.println("ADAM - New Split: " + line);
+
+        if (trueChild.getTotalCount() < Utils.DEFAULT_SUBTREE_FLOOR) {
+          newLeafInstanceCount += trueChild.getTotalCount();
+        }
+        if (falseChild.getTotalCount() < Utils.DEFAULT_SUBTREE_FLOOR) {
+          newLeafInstanceCount += falseChild.getTotalCount();
+        }
+
       }
 
     }

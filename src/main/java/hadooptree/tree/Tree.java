@@ -1,6 +1,7 @@
 package hadooptree.tree;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import org.jdom.Element;
 import org.jdom.output.XMLOutputter;
@@ -36,6 +37,15 @@ public class Tree {
 
   public Node evalToNode(ArrayList<Object> instance) {
     return root.evalToNode(instance);
+  }
+
+  public HashMap<String, Integer> createObjectiveCategoryIdMap() {
+    ArrayList<String> objectiveCategories = new ArrayList<String>(this.getObjectiveField().getCategorySet());
+    HashMap<String, Integer> categoryIdMap = new HashMap<String, Integer>();
+    for (int i = 0; i < objectiveCategories.size(); i++) {
+      categoryIdMap.put(objectiveCategories.get(i), i);
+    }
+    return categoryIdMap;
   }
 
   public Element toElement() {
@@ -109,6 +119,4 @@ public class Tree {
     hash = 11 * hash + (this.root != null ? this.root.hashCode() : 0);
     return hash;
   }
-
-  
 }

@@ -19,10 +19,13 @@ import org.jdom.input.SAXBuilder;
 
 public class Utils {
 
+  private static final double LOG2 = Math.log(2);
 //  public static final int DEFAULT_NUMERIC_SPLITS = 2;
 //  public static final int DEFAULT_SPLIT_FLOOR = 0;
   public static final int DEFAULT_NUMERIC_SPLITS = 10000;
   public static final int DEFAULT_SPLIT_FLOOR = 10;
+  public static final int DEFAULT_SUBTREE_FLOOR = 15000;
+  public static final double SUBTREE_AND_LEAF_RATIO = 0.5d;
 
   public static ArrayList<Object> convertInstanceStringToArrayList(String instanceString, ArrayList<Field> fields) throws Exception {
     ArrayList<Object> values = new ArrayList<Object>();
@@ -78,5 +81,78 @@ public class Utils {
     }
 
     return tree;
+  }
+
+  public static String printCounts(ArrayList<String> categories, Long[] counts) {
+    StringBuilder builder = new StringBuilder();
+    for (int i = 0; i < counts.length; i++) {
+      builder.append(categories.get(i));
+      builder.append("@");
+      builder.append(counts[i]);
+      builder.append(";");
+    }
+
+    String resultString = builder.toString();
+    resultString = resultString.substring(0, resultString.length() - 1);
+
+    return resultString;
+  }
+
+  public static long sumCounts(Long[] counts) {
+    long count = 0;
+    for (Long splitCount : counts) {
+      count += splitCount;
+    }
+    return count;
+  }
+
+  public static Long[] addCounts(Long[] targetCounts, Long[] sourceCounts) {
+    for (int i = 0; i < targetCounts.length; i++) {
+      targetCounts[i] += sourceCounts[i];
+    }
+
+    return targetCounts;
+  }
+
+  public static Long[] subtractCounts(Long[] targetCounts, Long[] sourceCounts) {
+    for (int i = 0; i < targetCounts.length; i++) {
+      targetCounts[i] -= sourceCounts[i];
+    }
+
+    return targetCounts;
+  }
+
+  public static double entropy(Long[] counts, long instanceCount) {
+    if (instanceCount == 0) {
+      return 0.0;
+    }
+
+    double entropy = 0.0;
+    double invDataSize = 1.0 / instanceCount;
+
+    for (Long count : counts) {
+      if (count == 0) {
+        continue; // otherwise we get a NaN
+      }
+      double p = count * invDataSize;
+      entropy += -p * Math.log(p) / LOG2;
+    }
+
+    return entropy;
+  }
+
+  public static double findInformationGain(Long[] originalCounts, Long[] trueCounts, Long[] falseCounts) {
+    long originalTotalCount = Utils.sumCounts(originalCounts);
+    double invDataSize = 1.0 / originalTotalCount;
+    double originalEntropy = Utils.entropy(originalCounts, originalTotalCount);
+
+    long trueInstanceCount = Utils.sumCounts(trueCounts);
+    long falseInstanceCount = originalTotalCount - trueInstanceCount;
+
+    double informationGain = originalEntropy;
+    informationGain -= trueInstanceCount * invDataSize * Utils.entropy(trueCounts, trueInstanceCount);
+    informationGain -= falseInstanceCount * invDataSize * Utils.entropy(falseCounts, falseInstanceCount);
+
+    return informationGain;
   }
 }
