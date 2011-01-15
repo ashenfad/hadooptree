@@ -62,12 +62,10 @@ public class GrowSubtreesJob {
 
       Node node = tree.evalToNode(instance);
 
-      if (node.isLeaf() || node.getTotalCount() > Utils.DEFAULT_SUBTREE_FLOOR) {
-        return;
+      if (!node.isLeaf() && node.getTotalCount() < Utils.DEFAULT_SUBTREE_FLOOR) {
+        int leafId = node.getId();
+        context.write(new Text(String.valueOf(leafId)), value);
       }
-
-      int leafId = node.getId();
-      context.write(new Text(String.valueOf(leafId)), value);
     }
   }
 

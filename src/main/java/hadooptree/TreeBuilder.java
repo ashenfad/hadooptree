@@ -3,6 +3,7 @@ package hadooptree;
 import hadooptree.job.NodeFieldSplitsJob;
 import hadooptree.job.NodeSplitsJob;
 import hadooptree.job.DefineFieldsJob;
+import hadooptree.job.FilterInstancesJob;
 import hadooptree.job.GrowSubtreesJob;
 import hadooptree.tree.Field;
 import hadooptree.tree.Tree;
@@ -26,9 +27,11 @@ import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.io.IOUtils;
 import org.apache.hadoop.io.IntWritable;
+import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.NullWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapreduce.Job;
+import org.apache.hadoop.mapreduce.Reducer;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 import org.apache.hadoop.mapreduce.lib.output.FileOutputFormat;
 import org.apache.hadoop.util.GenericOptionsParser;
@@ -49,10 +52,12 @@ public class TreeBuilder {
 
     Path inputPath = new Path(otherArgs[0]);
     Path outputPath = new Path(otherArgs[1]);
+    Path dataPath = inputPath;
     Path fieldPath = new Path(outputPath, "fields");
     Path categorySplitsPath = new Path(outputPath, "categorySplits");
     Path fieldSplitsPath = new Path(outputPath, "fieldSplits");
     Path subtreesPath = new Path(outputPath, "subtrees");
+    Path filteredInstancesPath = new Path(outputPath, "filteredInstances");
     Path treePath = new Path(outputPath, "tree/tree.xml");
 
     int objectiveFieldId = Integer.valueOf(otherArgs[2]);
@@ -91,10 +96,12 @@ public class TreeBuilder {
       currentLeafInstanceCount += treeRoot.getTotalCount();
     }
 
+    int filterIteration = 0;
+
     while (grewTree) {
       DistributedCache.addCacheFile(treePath.toUri(), conf);
 
-      double ratio = (double) currentLeafInstanceCount / (double) treeRoot.getTotalCount();
+      double ratio = (double) currentLeafInstanceCount / (double) currentInstanceCount;
       if (ratio > Utils.SUBTREE_AND_LEAF_RATIO) {
         Job growSubtreesJob = growSubtreesJob(args, conf, inputPath, subtreesPath);
         result = growSubtreesJob.waitForCompletion(true);
@@ -114,10 +121,23 @@ public class TreeBuilder {
 
           writeTree(tree, fs, treePath);
         }
+
+        Path filterOutputPath = new Path(filteredInstancesPath, String.valueOf(filterIteration));
+        Job filteredInstancesJob = filterInstancesJob(args, conf, dataPath, filterOutputPath);
+        result = filteredInstancesJob.waitForCompletion(true);
+
+        if (!result) {
+          System.exit(1);
+        }
+
+        dataPath = filterOutputPath;
+
+        currentInstanceCount -= currentLeafInstanceCount;
         currentLeafInstanceCount = 0;
+        filterIteration++;
       }
 
-      Job categorySplitsJob = findBestCategorySplitJob(args, conf, inputPath, categorySplitsPath);
+      Job categorySplitsJob = findBestCategorySplitJob(args, conf, dataPath, categorySplitsPath);
       result = categorySplitsJob.waitForCompletion(true);
 
       if (!result) {
@@ -182,6 +202,23 @@ public class TreeBuilder {
     FileOutputFormat.setOutputPath(growSubtreesJob, outputPath);
 
     return growSubtreesJob;
+  }
+
+  private static Job filterInstancesJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
+    Job filterInstancesJob = new Job(conf, "filter training instances");
+    filterInstancesJob.setJarByClass(TreeBuilder.class);
+    filterInstancesJob.setMapperClass(FilterInstancesJob.Map.class);
+    filterInstancesJob.setReducerClass(Reducer.class);
+
+    filterInstancesJob.setMapOutputKeyClass(NullWritable.class);
+    filterInstancesJob.setMapOutputValueClass(Text.class);
+    filterInstancesJob.setOutputKeyClass(LongWritable.class);
+    filterInstancesJob.setOutputValueClass(Text.class);
+
+    FileInputFormat.addInputPath(filterInstancesJob, inputPath);
+    FileOutputFormat.setOutputPath(filterInstancesJob, outputPath);
+
+    return filterInstancesJob;
   }
 
   private static Job findBestFieldSplitJob(String[] args, Configuration conf, Path inputPath, Path outputPath) throws IOException {
