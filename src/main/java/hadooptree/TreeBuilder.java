@@ -17,6 +17,7 @@ import java.io.Reader;
 import java.io.StringReader;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.TreeMap;
 import org.apache.hadoop.conf.Configuration;
@@ -326,7 +327,7 @@ public class TreeBuilder {
       }
     }
 
-    ArrayList<Field> fields = new ArrayList<Field>();
+    ArrayList<Field> allFields = new ArrayList<Field>();
 
     SAXBuilder builder = new SAXBuilder();
     for (String line : allLines) {
@@ -338,10 +339,12 @@ public class TreeBuilder {
 
       Element fieldElement = builder.build(in).getRootElement();
       Field field = Field.fromElement(fieldElement);
-      fields.add(field);
+      allFields.add(field);
     }
 
-    return fields;
+    Collections.sort(allFields);
+
+    return allFields;
   }
 
   private static BuildResults readNewSplits(Tree tree, HashMap<Integer, Node> nodeMap, Configuration conf, Path inputPath) throws Exception {

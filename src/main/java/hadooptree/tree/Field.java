@@ -7,7 +7,7 @@ import java.util.TreeMap;
 import org.jdom.Element;
 import org.jdom.output.XMLOutputter;
 
-public class Field {
+public class Field implements Comparable<Field> {
 
   private int index;
   private Boolean isCategorical;
@@ -226,5 +226,10 @@ public class Field {
     hash = 61 * hash + (int) (this.count ^ (this.count >>> 32));
     hash = 61 * hash + (this.categoryMap != null ? this.categoryMap.hashCode() : 0);
     return hash;
+  }
+
+  @Override
+  public int compareTo(Field t) {
+    return Integer.valueOf(this.getIndex()).compareTo(Integer.valueOf(t.getIndex()));
   }
 }

@@ -23,7 +23,7 @@ public class Utils {
 //  public static final int DEFAULT_NUMERIC_SPLITS = 2;
 //  public static final int DEFAULT_SPLIT_FLOOR = 0;
   public static final int DEFAULT_NUMERIC_SPLITS = 10000;
-  public static final int DEFAULT_SPLIT_FLOOR = 10;
+  public static final int DEFAULT_SPLIT_FLOOR = 100;
   public static final int DEFAULT_SUBTREE_FLOOR = 15000;
   public static final double SUBTREE_AND_LEAF_RATIO = 0.5d;
 
